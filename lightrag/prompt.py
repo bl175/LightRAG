@@ -95,7 +95,7 @@ Copy of laboratory investigation results required by the employee health physici
 # VIII. References:
 CDC Guidance for Evaluating Health-Care Personnel for Hepatitis B Virus Protection and for Administering Post exposure Management Recommendations and Reports December 20, 2013 / 62(RR10);1-19
 Occupational Management of Communicable Disease Exposure and Illness in Healthcare Workers, March 2012, For Healthcare Professionals
-Chin, J. Control of Communicable Diseases Manual, $17^{\mathrm{th}}$ ed. 2000. American Public Health Association, Washington, DC.
+Chin, J. Control of Communicable Diseases Manual, $17^[\mathrm[th]]$ ed. 2000. American Public Health Association, Washington, DC.
 CDC Guidelines For Infection Control in Health Care Personnel, 1998, AJIC, Vol. 26, No. 3, pp. 289-354.
 CDC, MMWR, "Updated U.S. Public Health Service Guidelines for the Management of Occupational Exposures to HBV, HCV and HIV and Recommendations for Post exposure Prophylaxis". June 29, 2001, Vol. 50, No. RR\_11, pp. 1-53.
 CDC Guidance for Evaluating Health-Care Personnel for Hepatitis B Virus Protection and for Administering Post exposure Management Recommendations and Reports December 20, 2013 / 62(RR10);1-19
@@ -237,7 +237,7 @@ Content:
 To ensure that all adult & pediatric patients with tracheostomy receive safe and standardized care.
 # II. Policy:
 2.1 Only competent registered nurses trained in tracheostomy shall perform tracheostomy care per competency checklist that is completed by clinical resource nurse and the Tracheostomy Care Specialist.
-2.2 All patients with tracheostomy shall be assessed by the surgical resident and Tracheostomy Care Specialist upon admission, after tracheostomy tube insertion, when changed and every $24\mathbf{hr}$ . during hospitalization, with documentation of at least once the tracheostomy care sheet.
+2.2 All patients with tracheostomy shall be assessed by the surgical resident and Tracheostomy Care Specialist upon admission, after tracheostomy tube insertion, when changed and every $24\mathbf[hr]$ . during hospitalization, with documentation of at least once the tracheostomy care sheet.
 2.3 All hospitalized patients with tracheostomy should be placed on O2 therapy (as needed).
 2.4 All patients with tracheostomy should be referred to Speech-Language Pathology Services.
 # III. Scope:
@@ -249,7 +249,7 @@ This policy will be applied to The Tracheostomy Care Specialist, all registered 
 4.4 The Tracheostomy Care Specialist, considered the clinical educator who should conduct registered nurse training about tracheostomy care at KHCC.in collaboration with nursing training center
 
 # V. Definitions:
- Tracheostomy: A temporary or permanent surgical opening created by an incision below the Cricoid cartilage between the $2^{\mathrm{nd}}$ and $4^{\mathrm{th}}$ tracheal rings to make an exterior opening called the stoma.
+ Tracheostomy: A temporary or permanent surgical opening created by an incision below the Cricoid cartilage between the $2^[\mathrm[nd]]$ and $4^[\mathrm[th]]$ tracheal rings to make an exterior opening called the stoma.
  Tracheostomy tube: A device inserted into the trachea to maintain a patent airway, to bypass an Airway obstruction, to facilitate ventilation and for the removal of tracheal secretions.
  Suctioning: Mechanical aspiration of secretions from the airway.
 # VI. Procedures:
@@ -261,7 +261,7 @@ This policy will be applied to The Tracheostomy Care Specialist, all registered 
 6.2.1.1 Assess patients with tracheostomy upon admission, after tracheostomy tube insertion and after tracheostomy tube change.
 6.2.1.2 Remove the tracheostomy tube sutures when indicated.
 6.2.1.3 Change tracheostomy tube as indicated
-6.2.1.4 Written orders that include the followings:  The Tracheostomy Care Specialist notification  Cuff status  Humidification/O2 needs  $\mathrm{HOB}>30\$ at all times  Nutrition/hydration & medication route Speech-Language Pathology consults
+6.2.1.4 Written orders that include the followings:  The Tracheostomy Care Specialist notification  Cuff status  Humidification/O2 needs  $\mathrm[HOB]>30\$ at all times  Nutrition/hydration & medication route Speech-Language Pathology consults
 
 6.2.1.5 Perform the 1st tracheostomy tube change with the assistance of tracheostomy Care Specialist and Registered Nurse on the presence of the head and neck surgeon / ENT
 6.2.1.6 The following items should be present on the trolley during the tracheostomy Tube change:
