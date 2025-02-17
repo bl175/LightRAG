@@ -476,52 +476,32 @@ Output:
 PROMPTS["keywords_extraction_examples"] = [
     """Example 1:
 
-Query: "What are the requirements for patient medication administration and documentation?"
+Query: "What are the policies and procedures for employee exposure to communicable diseases?"
 ################
 Output:
 {
-  "high_level_keywords": ["Medication administration", "Clinical documentation", "Patient safety"],
-  "low_level_keywords": ["Medication rights", "Nurse verification", "MAR documentation", "Drug dosage", "Administration time"]
+  "high_level_keywords": ["Exposure management", "Infection control", "Employee safety"],
+  "low_level_keywords": ["Post-exposure reporting", "Blood-borne pathogens", "Incident documentation", "Prophylaxis protocols", "Employee health clinic"]
 }
 #############################""",
     """Example 2:
 
-Query: "What are the infection control protocols for isolation patients?"
+Query: "What are the criteria for determining exposure to different communicable diseases?"
 ################
 Output:
 {
-  "high_level_keywords": ["Infection control", "Patient isolation", "Healthcare safety"],
-  "low_level_keywords": ["PPE requirements", "Hand hygiene", "Contact precautions", "Room cleaning", "Visitor restrictions"]
+  "high_level_keywords": ["Exposure criteria", "Disease transmission", "Healthcare safety"],
+  "low_level_keywords": ["Blood exposure", "Respiratory secretions", "Direct contact", "Airborne transmission", "Mucosal exposure"]
 }
 #############################""",
     """Example 3:
 
-Query: "What is the emergency response protocol for code blue situations?"
+Query: "What are the protocols for tracheostomy care and management?"
 ################
 Output:
 {
-  "high_level_keywords": ["Emergency response", "Code blue", "Resuscitation protocol"],
-  "low_level_keywords": ["CPR procedure", "Team roles", "Emergency equipment", "Documentation requirements", "Response time"]
-}
-#############################""",
-    """Example 4:
-
-Query: "What are the standards for nursing handoff communication?"
-################
-Output:
-{
-  "high_level_keywords": ["Nursing handoff", "Clinical communication", "Patient care transition"],
-  "low_level_keywords": ["SBAR format", "Shift report", "Patient status", "Care plan", "Safety checks"]
-}
-#############################""",
-    """Example 5:
-
-Query: "What are the requirements for surgical site marking and time-out procedures?"
-################
-Output:
-{
-  "high_level_keywords": ["Surgical safety", "Site marking", "Pre-operative verification"],
-  "low_level_keywords": ["Time-out checklist", "Patient identification", "Surgical consent", "Site verification", "Team communication"]
+  "high_level_keywords": ["Tracheostomy care", "Patient safety", "Clinical procedures"],
+  "low_level_keywords": ["Suctioning protocol", "Tube maintenance", "Assessment requirements", "Emergency management", "Documentation standards"]
 }
 #############################"""
 ]
