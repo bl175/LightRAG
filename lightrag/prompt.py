@@ -60,7 +60,7 @@ Entity_types: [document_number, document_title, originating_entity, purpose, pol
 Text:
 '''
 File Name: Employee Exposure and Post Exposure Management POLINC-20R10.pdf
-Document Number: POLINC-20
+Document Number: POLINC-20 (note: remove the revision number in everything (example: POLINC-20R10 -> POLINC-20))
 Document Title: Sharps and Contamination Incident Report
 Originating Entity: nan nan infection contorl
 
@@ -157,7 +157,7 @@ Entity_types: [document_number, document_title, originating_entity, criteria_hea
 Text:
 '''
 File Name: Criteria of exposure POLINC-20-Attach.B-R1 (2).pdf
-Document Number: POLINC-20
+Document Number: POLINC-20 (note: if it's an attachment, add to the document number (example: POLINC-20/Attach. B))
 Document Title: Sharps and Contamination Incident Report Attachment B
 Originating Entity: nan nan infection contorl
 
@@ -228,7 +228,7 @@ Entity_types: [document_number, document_title, originating_entity, purpose, pol
 Text:
 '''
 File Name: Tracheostomy Care POLSRG-02R5.pdf
-Document Number: POLSRG-02
+Document Number: POLSRG-02R5 (note: remove the revision number in everything (example: POLSRG-02R5 -> POLSRG-02))
 Document Title: Tracheostomy Care
 Originating Entity: Medical Department Surgery
 
