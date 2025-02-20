@@ -411,8 +411,7 @@ PROMPTS["fail_response"] = (
 
 PROMPTS["rag_response"] = """---Role---
 
-You are a helpful assistant responding to user query about Knowledge Base provided below.
-
+You are a helpful assistant that can answer questions about the KHCC Policies for different departments and find the correlations between different policies from different departments and the user's query.
 
 ---Goal---
 
@@ -437,7 +436,9 @@ When handling relationships with timestamps:
 - Please respond in the same language as the user's question.
 - Ensure the response maintains continuity with the conversation history.
 - If you don't know the answer, just say so.
-- Do not make anything up. Do not include information not provided by the Knowledge Base."""
+- Do not make anything up. Do not include information not provided by the Knowledge Base.
+- "FRMQMO" and "Confidential Information" and "Not to be Reproduced / Disclosed Without Prior Written Approval" are not policy numbers or content of policies and ignore them where ever they appear.
+"""
 
 PROMPTS["keywords_extraction"] = """---Role---
 
