@@ -1,28 +1,22 @@
 from __future__ import annotations
-from typing import Any
 
 GRAPH_FIELD_SEP = "<SEP>"
 
-PROMPTS: dict[str, Any] = {}
+PROMPTS = {}
 
 PROMPTS["DEFAULT_LANGUAGE"] = "English"
 PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|>"
 PROMPTS["DEFAULT_RECORD_DELIMITER"] = "##"
 PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
+PROMPTS["process_tickers"] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 PROMPTS["DEFAULT_ENTITY_TYPES"] = ["document_number", "document_title", "originating_entity", "purpose", "policy", "scope", "responsibility", "definition", "procedure", "documentation", "reference"]
 
-<<<<<<< HEAD
 PROMPTS["entity_extraction"] = """-Goal-
 You are an expert at extracting entities and relationships from policy documents for the King Hussein Cancer Center (KHCC). Given a text document that is potentially relevant to this activity and a list of entity types, identify all entities of those types from the text and all relationships among the identified entities.
 Use {language} as output language. (Ignore, and don't use the content text if you don't understand the language)
-=======
-PROMPTS["entity_extraction"] = """---Goal---
-Given a text document that is potentially relevant to this activity and a list of entity types, identify all entities of those types from the text and all relationships among the identified entities.
-Use {language} as output language.
->>>>>>> b020f5fe2b9a17c9d8896d56620df2aa654d2c64
 
----Steps---
+-Steps-
 1. Identify all entities. For each identified entity, extract the following information:
 - entity_name: Name of the entity, use same language as input text. If English, capitalized the name.
 - entity_type: One of the following types: [{entity_types}]
@@ -46,17 +40,18 @@ Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_
 5. When finished, output {completion_delimiter}
 
 ######################
----Examples---
+-Examples-
 ######################
 {examples}
 
 #############################
----Real Data---
+-Real Data-
 ######################
 Entity_types: {entity_types}
 Text: {input_text}
 ######################
-Output:"""
+Output:
+"""
 
 PROMPTS["entity_extraction_examples"] = [
     """Example 1:
@@ -393,7 +388,7 @@ Make sure it is written in third person, and include the entity names so we the 
 Use {language} as output language.
 
 #######
----Data---
+-Data-
 Entities: {entity_name}
 Description List: {description_list}
 #######
@@ -462,12 +457,12 @@ Given the query and conversation history, list both high-level and low-level key
   - "low_level_keywords" for specific entities or details
 
 ######################
----Examples---
+-Examples-
 ######################
 {examples}
 
 #############################
----Real Data---
+-Real Data-
 ######################
 Conversation History:
 {history}
