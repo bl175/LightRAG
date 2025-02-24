@@ -1,48 +1,7 @@
-"""
-OpenAI LLM Interface Module
-==========================
-
-This module provides interfaces for interacting with openai's language models,
-including text generation and embedding capabilities.
-
-Author: Lightrag team
-Created: 2024-01-24
-License: MIT License
-
-Copyright (c) 2024 Lightrag
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-Version: 1.0.0
-
-Change Log:
-- 1.0.0 (2024-01-24): Initial release
-    * Added async chat completion support
-    * Added embedding generation
-    * Added stream response capability
-
-Dependencies:
-    - openai
-    - numpy
-    - pipmaster
-    - Python >= 3.10
-
-Usage:
-    from llm_interfaces.openai import openai_model_complete, openai_embed
-"""
-
-__version__ = "1.0.0"
-__author__ = "lightrag Team"
-__status__ = "Production"
-
-
+from ..utils import verbose_debug, VERBOSE_DEBUG
 import sys
 import os
+import logging
 
 if sys.version_info < (3, 9):
     from typing import AsyncIterator
@@ -76,7 +35,7 @@ from lightrag.types import GPTKeywordExtractionFormat
 from lightrag.api import __api_version__
 
 import numpy as np
-from typing import Union
+from typing import Any, Union
 
 
 class InvalidResponseError(Exception):
@@ -93,13 +52,13 @@ class InvalidResponseError(Exception):
     ),
 )
 async def openai_complete_if_cache(
-    model,
-    prompt,
-    system_prompt=None,
-    history_messages=None,
-    base_url=None,
-    api_key=None,
-    **kwargs,
+    model: str,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    **kwargs: Any,
 ) -> str:
     if history_messages is None:
         history_messages = []
@@ -110,6 +69,11 @@ async def openai_complete_if_cache(
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_8) LightRAG/{__api_version__}",
         "Content-Type": "application/json",
     }
+
+    # Set openai logger level to INFO when VERBOSE_DEBUG is off
+    if not VERBOSE_DEBUG and logger.level == logging.DEBUG:
+        logging.getLogger("openai").setLevel(logging.INFO)
+
     openai_async_client = (
         AsyncOpenAI(default_headers=default_headers, api_key=api_key)
         if base_url is None
@@ -119,19 +83,17 @@ async def openai_complete_if_cache(
     )
     kwargs.pop("hashing_kv", None)
     kwargs.pop("keyword_extraction", None)
-    messages = []
+    messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages)
     messages.append({"role": "user", "content": prompt})
 
-    # 添加日志输出
-    logger.debug("===== Query Input to LLM =====")
+    logger.debug("===== Sending Query to LLM =====")
     logger.debug(f"Model: {model}   Base URL: {base_url}")
     logger.debug(f"Additional kwargs: {kwargs}")
-    logger.debug(f"Query: {prompt}")
-    logger.debug(f"System prompt: {system_prompt}")
-    # logger.debug(f"Messages: {messages}")
+    verbose_debug(f"Query: {prompt}")
+    verbose_debug(f"System prompt: {system_prompt}")
 
     try:
         if "response_format" in kwargs:
@@ -143,18 +105,18 @@ async def openai_complete_if_cache(
                 model=model, messages=messages, **kwargs
             )
     except APIConnectionError as e:
-        logger.error(f"OpenAI API Connection Error: {str(e)}")
+        logger.error(f"OpenAI API Connection Error: {e}")
         raise
     except RateLimitError as e:
-        logger.error(f"OpenAI API Rate Limit Error: {str(e)}")
+        logger.error(f"OpenAI API Rate Limit Error: {e}")
         raise
     except APITimeoutError as e:
-        logger.error(f"OpenAI API Timeout Error: {str(e)}")
+        logger.error(f"OpenAI API Timeout Error: {e}")
         raise
     except Exception as e:
-        logger.error(f"OpenAI API Call Failed: {str(e)}")
-        logger.error(f"Model: {model}")
-        logger.error(f"Request parameters: {kwargs}")
+        logger.error(
+            f"OpenAI API Call Failed,\nModel: {model},\nParams: {kwargs}, Got: {e}"
+        )
         raise
 
     if hasattr(response, "__aiter__"):

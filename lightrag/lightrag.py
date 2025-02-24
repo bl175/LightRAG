@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import configparser
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Any, AsyncIterator, Callable, Iterator, cast
+from typing import Any, AsyncIterator, Callable, Iterator, cast, final
+
+from lightrag.kg import (
+    STORAGE_ENV_REQUIREMENTS,
+    STORAGES,
+    verify_storage_implementation,
+)
 
 from .base import (
     BaseGraphStorage,
@@ -17,6 +23,7 @@ from .base import (
     DocStatusStorage,
     QueryParam,
     StorageNameSpace,
+    StoragesStatus,
 )
 from .namespace import NameSpace, make_namespace
 from .operate import (
@@ -31,221 +38,41 @@ from .operate import (
 from .prompt import GRAPH_FIELD_SEP
 from .utils import (
     EmbeddingFunc,
+    always_get_an_event_loop,
     compute_mdhash_id,
     convert_response_to_json,
+    encode_string_by_tiktoken,
+    lazy_external_import,
     limit_async_func_call,
     logger,
     set_logger,
 )
 from .types import KnowledgeGraph
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv(override=True)
+
+# TODO: TO REMOVE @Yannick
 config = configparser.ConfigParser()
 config.read("config.ini", "utf-8")
 
-# Storage type and implementation compatibility validation table
-STORAGE_IMPLEMENTATIONS = {
-    "KV_STORAGE": {
-        "implementations": [
-            "JsonKVStorage",
-            "MongoKVStorage",
-            "RedisKVStorage",
-            "TiDBKVStorage",
-            "PGKVStorage",
-            "OracleKVStorage",
-        ],
-        "required_methods": ["get_by_id", "upsert"],
-    },
-    "GRAPH_STORAGE": {
-        "implementations": [
-            "NetworkXStorage",
-            "Neo4JStorage",
-            "MongoGraphStorage",
-            "TiDBGraphStorage",
-            "AGEStorage",
-            "GremlinStorage",
-            "PGGraphStorage",
-            "OracleGraphStorage",
-        ],
-        "required_methods": ["upsert_node", "upsert_edge"],
-    },
-    "VECTOR_STORAGE": {
-        "implementations": [
-            "NanoVectorDBStorage",
-            "MilvusVectorDBStorage",
-            "ChromaVectorDBStorage",
-            "TiDBVectorDBStorage",
-            "PGVectorStorage",
-            "FaissVectorDBStorage",
-            "QdrantVectorDBStorage",
-            "OracleVectorDBStorage",
-            "MongoVectorDBStorage",
-        ],
-        "required_methods": ["query", "upsert"],
-    },
-    "DOC_STATUS_STORAGE": {
-        "implementations": [
-            "JsonDocStatusStorage",
-            "PGDocStatusStorage",
-            "PGDocStatusStorage",
-            "MongoDocStatusStorage",
-        ],
-        "required_methods": ["get_pending_docs"],
-    },
-}
 
-# Storage implementation environment variable without default value
-STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
-    # KV Storage Implementations
-    "JsonKVStorage": [],
-    "MongoKVStorage": [],
-    "RedisKVStorage": ["REDIS_URI"],
-    "TiDBKVStorage": ["TIDB_USER", "TIDB_PASSWORD", "TIDB_DATABASE"],
-    "PGKVStorage": ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"],
-    "OracleKVStorage": [
-        "ORACLE_DSN",
-        "ORACLE_USER",
-        "ORACLE_PASSWORD",
-        "ORACLE_CONFIG_DIR",
-    ],
-    # Graph Storage Implementations
-    "NetworkXStorage": [],
-    "Neo4JStorage": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
-    "MongoGraphStorage": [],
-    "TiDBGraphStorage": ["TIDB_USER", "TIDB_PASSWORD", "TIDB_DATABASE"],
-    "AGEStorage": [
-        "AGE_POSTGRES_DB",
-        "AGE_POSTGRES_USER",
-        "AGE_POSTGRES_PASSWORD",
-    ],
-    "GremlinStorage": ["GREMLIN_HOST", "GREMLIN_PORT", "GREMLIN_GRAPH"],
-    "PGGraphStorage": [
-        "POSTGRES_USER",
-        "POSTGRES_PASSWORD",
-        "POSTGRES_DATABASE",
-    ],
-    "OracleGraphStorage": [
-        "ORACLE_DSN",
-        "ORACLE_USER",
-        "ORACLE_PASSWORD",
-        "ORACLE_CONFIG_DIR",
-    ],
-    # Vector Storage Implementations
-    "NanoVectorDBStorage": [],
-    "MilvusVectorDBStorage": [],
-    "ChromaVectorDBStorage": [],
-    "TiDBVectorDBStorage": ["TIDB_USER", "TIDB_PASSWORD", "TIDB_DATABASE"],
-    "PGVectorStorage": ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"],
-    "FaissVectorDBStorage": [],
-    "QdrantVectorDBStorage": ["QDRANT_URL"],  # QDRANT_API_KEY has default value None
-    "OracleVectorDBStorage": [
-        "ORACLE_DSN",
-        "ORACLE_USER",
-        "ORACLE_PASSWORD",
-        "ORACLE_CONFIG_DIR",
-    ],
-    "MongoVectorDBStorage": [],
-    # Document Status Storage Implementations
-    "JsonDocStatusStorage": [],
-    "PGDocStatusStorage": ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"],
-    "MongoDocStatusStorage": [],
-}
-
-# Storage implementation module mapping
-STORAGES = {
-    "NetworkXStorage": ".kg.networkx_impl",
-    "JsonKVStorage": ".kg.json_kv_impl",
-    "NanoVectorDBStorage": ".kg.nano_vector_db_impl",
-    "JsonDocStatusStorage": ".kg.json_doc_status_impl",
-    "Neo4JStorage": ".kg.neo4j_impl",
-    "OracleKVStorage": ".kg.oracle_impl",
-    "OracleGraphStorage": ".kg.oracle_impl",
-    "OracleVectorDBStorage": ".kg.oracle_impl",
-    "MilvusVectorDBStorage": ".kg.milvus_impl",
-    "MongoKVStorage": ".kg.mongo_impl",
-    "MongoDocStatusStorage": ".kg.mongo_impl",
-    "MongoGraphStorage": ".kg.mongo_impl",
-    "MongoVectorDBStorage": ".kg.mongo_impl",
-    "RedisKVStorage": ".kg.redis_impl",
-    "ChromaVectorDBStorage": ".kg.chroma_impl",
-    "TiDBKVStorage": ".kg.tidb_impl",
-    "TiDBVectorDBStorage": ".kg.tidb_impl",
-    "TiDBGraphStorage": ".kg.tidb_impl",
-    "PGKVStorage": ".kg.postgres_impl",
-    "PGVectorStorage": ".kg.postgres_impl",
-    "AGEStorage": ".kg.age_impl",
-    "PGGraphStorage": ".kg.postgres_impl",
-    "GremlinStorage": ".kg.gremlin_impl",
-    "PGDocStatusStorage": ".kg.postgres_impl",
-    "FaissVectorDBStorage": ".kg.faiss_impl",
-    "QdrantVectorDBStorage": ".kg.qdrant_impl",
-}
-
-
-def lazy_external_import(module_name: str, class_name: str) -> Callable[..., Any]:
-    """Lazily import a class from an external module based on the package of the caller."""
-    # Get the caller's module and package
-    import inspect
-
-    caller_frame = inspect.currentframe().f_back
-    module = inspect.getmodule(caller_frame)
-    package = module.__package__ if module else None
-
-    def import_class(*args: Any, **kwargs: Any):
-        import importlib
-
-        module = importlib.import_module(module_name, package=package)
-        cls = getattr(module, class_name)
-        return cls(*args, **kwargs)
-
-    return import_class
-
-
-def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
-    """
-    Ensure that there is always an event loop available.
-
-    This function tries to get the current event loop. If the current event loop is closed or does not exist,
-    it creates a new event loop and sets it as the current event loop.
-
-    Returns:
-        asyncio.AbstractEventLoop: The current or newly created event loop.
-    """
-    try:
-        # Try to get the current event loop
-        current_loop = asyncio.get_event_loop()
-        if current_loop.is_closed():
-            raise RuntimeError("Event loop is closed.")
-        return current_loop
-
-    except RuntimeError:
-        # If no event loop exists or it is closed, create a new one
-        logger.info("Creating a new event loop in main thread.")
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        return new_loop
-
-
+@final
 @dataclass
 class LightRAG:
     """LightRAG: Simple and Fast Retrieval-Augmented Generation."""
 
+    # Directory
+    # ---
+
     working_dir: str = field(
-        default_factory=lambda: f'./lightrag_cache_{datetime.now().strftime("%Y-%m-%d-%H:%M:%S")}'
+        default=f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
     )
     """Directory where cache and temporary files are stored."""
 
-    embedding_cache_config: dict[str, Any] = field(
-        default_factory=lambda: {
-            "enabled": False,
-            "similarity_threshold": 0.95,
-            "use_llm_check": False,
-        }
-    )
-    """Configuration for embedding cache.
-    - enabled: If True, enables caching to avoid redundant computations.
-    - similarity_threshold: Minimum similarity score to use cached embeddings.
-    - use_llm_check: If True, validates cached embeddings using an LLM.
-    """
+    # Storage
+    # ---
 
     kv_storage: str = field(default="JsonKVStorage")
     """Storage backend for key-value data."""
@@ -260,32 +87,74 @@ class LightRAG:
     """Storage type for tracking document processing statuses."""
 
     # Logging
-    current_log_level = logger.level
-    log_level: int = field(default=current_log_level)
+    # ---
+
+    log_level: int = field(default=logger.level)
     """Logging level for the system (e.g., 'DEBUG', 'INFO', 'WARNING')."""
 
-    log_dir: str = field(default=os.getcwd())
-    """Directory where logs are stored. Defaults to the current working directory."""
-
-    # Text chunking
-    chunk_token_size: int = 1200
-    """Maximum number of tokens per text chunk when splitting documents."""
-
-    chunk_overlap_token_size: int = 100
-    """Number of overlapping tokens between consecutive text chunks to preserve context."""
-
-    tiktoken_model_name: str = "gpt-4o-mini"
-    """Model name used for tokenization when chunking text."""
+    log_file_path: str = field(default=os.path.join(os.getcwd(), "lightrag.log"))
+    """Log file path."""
 
     # Entity extraction
-    entity_extract_max_gleaning: int = 1
+    # ---
+
+    entity_extract_max_gleaning: int = field(default=1)
     """Maximum number of entity extraction attempts for ambiguous content."""
 
-    entity_summary_to_max_tokens: int = 500
+    entity_summary_to_max_tokens: int = field(
+        default=int(os.getenv("MAX_TOKEN_SUMMARY", 500))
+    )
+
+    # Text chunking
+    # ---
+
+    chunk_token_size: int = field(default=int(os.getenv("CHUNK_SIZE", 1200)))
+    """Maximum number of tokens per text chunk when splitting documents."""
+
+    chunk_overlap_token_size: int = field(
+        default=int(os.getenv("CHUNK_OVERLAP_SIZE", 100))
+    )
+    """Number of overlapping tokens between consecutive text chunks to preserve context."""
+
+    tiktoken_model_name: str = field(default="gpt-4o-mini")
+    """Model name used for tokenization when chunking text."""
+
     """Maximum number of tokens used for summarizing extracted entities."""
 
+    chunking_func: Callable[
+        [
+            str,
+            str | None,
+            bool,
+            int,
+            int,
+            str,
+        ],
+        list[dict[str, Any]],
+    ] = field(default_factory=lambda: chunking_by_token_size)
+    """
+    Custom chunking function for splitting text into chunks before processing.
+
+    The function should take the following parameters:
+
+        - `content`: The text to be split into chunks.
+        - `split_by_character`: The character to split the text on. If None, the text is split into chunks of `chunk_token_size` tokens.
+        - `split_by_character_only`: If True, the text is split only on the specified character.
+        - `chunk_token_size`: The maximum number of tokens per chunk.
+        - `chunk_overlap_token_size`: The number of overlapping tokens between consecutive chunks.
+        - `tiktoken_model_name`: The name of the tiktoken model to use for tokenization.
+
+    The function should return a list of dictionaries, where each dictionary contains the following keys:
+        - `tokens`: The number of tokens in the chunk.
+        - `content`: The text content of the chunk.
+
+    Defaults to `chunking_by_token_size` if not specified.
+    """
+
     # Node embedding
-    node_embedding_algorithm: str = "node2vec"
+    # ---
+
+    node_embedding_algorithm: str = field(default="node2vec")
     """Algorithm used for node embedding in knowledge graphs."""
 
     node2vec_params: dict[str, int] = field(
@@ -307,112 +176,101 @@ class LightRAG:
     - random_seed: Seed value for reproducibility.
     """
 
-    embedding_func: EmbeddingFunc | None = None
+    # Embedding
+    # ---
+
+    embedding_func: EmbeddingFunc | None = field(default=None)
     """Function for computing text embeddings. Must be set before use."""
 
-    embedding_batch_num: int = 32
+    embedding_batch_num: int = field(default=32)
     """Batch size for embedding computations."""
 
-    embedding_func_max_async: int = 16
+    embedding_func_max_async: int = field(default=16)
     """Maximum number of concurrent embedding function calls."""
 
+    embedding_cache_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "similarity_threshold": 0.95,
+            "use_llm_check": False,
+        }
+    )
+    """Configuration for embedding cache.
+    - enabled: If True, enables caching to avoid redundant computations.
+    - similarity_threshold: Minimum similarity score to use cached embeddings.
+    - use_llm_check: If True, validates cached embeddings using an LLM.
+    """
+
     # LLM Configuration
-    llm_model_func: Callable[..., object] | None = None
+    # ---
+
+    llm_model_func: Callable[..., object] | None = field(default=None)
     """Function for interacting with the large language model (LLM). Must be set before use."""
 
-    llm_model_name: str = "meta-llama/Llama-3.2-1B-Instruct"
+    llm_model_name: str = field(default="gpt-4o-mini")
     """Name of the LLM model used for generating responses."""
 
-    llm_model_max_token_size: int = int(os.getenv("MAX_TOKENS", "32768"))
+    llm_model_max_token_size: int = field(default=int(os.getenv("MAX_TOKENS", 32768)))
     """Maximum number of tokens allowed per LLM response."""
 
-    llm_model_max_async: int = int(os.getenv("MAX_ASYNC", "16"))
+    llm_model_max_async: int = field(default=int(os.getenv("MAX_ASYNC", 16)))
     """Maximum number of concurrent LLM calls."""
 
     llm_model_kwargs: dict[str, Any] = field(default_factory=dict)
     """Additional keyword arguments passed to the LLM model function."""
 
     # Storage
+    # ---
+
     vector_db_storage_cls_kwargs: dict[str, Any] = field(default_factory=dict)
     """Additional parameters for vector database storage."""
 
     namespace_prefix: str = field(default="")
     """Prefix for namespacing stored data across different environments."""
 
-    enable_llm_cache: bool = True
+    enable_llm_cache: bool = field(default=True)
     """Enables caching for LLM responses to avoid redundant computations."""
 
-    enable_llm_cache_for_entity_extract: bool = True
+    enable_llm_cache_for_entity_extract: bool = field(default=True)
     """If True, enables caching for entity extraction steps to reduce LLM costs."""
 
     # Extensions
+    # ---
+
+    max_parallel_insert: int = field(default=int(os.getenv("MAX_PARALLEL_INSERT", 20)))
+    """Maximum number of parallel insert operations."""
+
     addon_params: dict[str, Any] = field(default_factory=dict)
 
-    """Dictionary for additional parameters and extensions."""
-    convert_response_to_json_func: Callable[[str], dict[str, Any]] = (
-        convert_response_to_json
+    # Storages Management
+    # ---
+
+    auto_manage_storages_states: bool = field(default=True)
+    """If True, lightrag will automatically calls initialize_storages and finalize_storages at the appropriate times."""
+
+    # Storages Management
+    # ---
+
+    convert_response_to_json_func: Callable[[str], dict[str, Any]] = field(
+        default_factory=lambda: convert_response_to_json
+    )
+    """
+    Custom function for converting LLM responses to JSON format.
+
+    The default function is :func:`.utils.convert_response_to_json`.
+    """
+
+    cosine_better_than_threshold: float = field(
+        default=float(os.getenv("COSINE_THRESHOLD", 0.2))
     )
 
-    # Custom Chunking Function
-    chunking_func: Callable[
-        [
-            str,
-            str | None,
-            bool,
-            int,
-            int,
-            str,
-        ],
-        list[dict[str, Any]],
-    ] = chunking_by_token_size
-
-    def verify_storage_implementation(
-        self, storage_type: str, storage_name: str
-    ) -> None:
-        """Verify if storage implementation is compatible with specified storage type
-
-        Args:
-            storage_type: Storage type (KV_STORAGE, GRAPH_STORAGE etc.)
-            storage_name: Storage implementation name
-
-        Raises:
-            ValueError: If storage implementation is incompatible or missing required methods
-        """
-        if storage_type not in STORAGE_IMPLEMENTATIONS:
-            raise ValueError(f"Unknown storage type: {storage_type}")
-
-        storage_info = STORAGE_IMPLEMENTATIONS[storage_type]
-        if storage_name not in storage_info["implementations"]:
-            raise ValueError(
-                f"Storage implementation '{storage_name}' is not compatible with {storage_type}. "
-                f"Compatible implementations are: {', '.join(storage_info['implementations'])}"
-            )
-
-    def check_storage_env_vars(self, storage_name: str) -> None:
-        """Check if all required environment variables for storage implementation exist
-
-        Args:
-            storage_name: Storage implementation name
-
-        Raises:
-            ValueError: If required environment variables are missing
-        """
-        required_vars = STORAGE_ENV_REQUIREMENTS.get(storage_name, [])
-        missing_vars = [var for var in required_vars if var not in os.environ]
-
-        if missing_vars:
-            raise ValueError(
-                f"Storage implementation '{storage_name}' requires the following "
-                f"environment variables: {', '.join(missing_vars)}"
-            )
+    _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
     def __post_init__(self):
-        os.makedirs(self.log_dir, exist_ok=True)
-        log_file = os.path.join(self.log_dir, "lightrag.log")
-        set_logger(log_file)
-
-        logger.setLevel(self.log_level)
+        os.makedirs(os.path.dirname(self.log_file_path), exist_ok=True)
+        set_logger(self.log_file_path, self.log_level)
         logger.info(f"Logger initialized for working directory: {self.working_dir}")
+
         if not os.path.exists(self.working_dir):
             logger.info(f"Creating working directory {self.working_dir}")
             os.makedirs(self.working_dir)
@@ -427,20 +285,17 @@ class LightRAG:
 
         for storage_type, storage_name in storage_configs:
             # Verify storage implementation compatibility
-            self.verify_storage_implementation(storage_type, storage_name)
+            verify_storage_implementation(storage_type, storage_name)
             # Check environment variables
             # self.check_storage_env_vars(storage_name)
 
         # Ensure vector_db_storage_cls_kwargs has required fields
-        default_vector_db_kwargs = {
-            "cosine_better_than_threshold": float(os.getenv("COSINE_THRESHOLD", "0.2"))
-        }
         self.vector_db_storage_cls_kwargs = {
-            **default_vector_db_kwargs,
+            "cosine_better_than_threshold": self.cosine_better_than_threshold,
             **self.vector_db_storage_cls_kwargs,
         }
 
-        # show config
+        # Show config
         global_config = asdict(self)
         _print_config = ",\n  ".join([f"{k} = {v}" for k, v in global_config.items()])
         logger.debug(f"LightRAG init with param:\n  {_print_config}\n")
@@ -547,6 +402,65 @@ class LightRAG:
             )
         )
 
+        self._storages_status = StoragesStatus.CREATED
+
+        # Initialize storages
+        if self.auto_manage_storages_states:
+            loop = always_get_an_event_loop()
+            loop.run_until_complete(self.initialize_storages())
+
+    def __del__(self):
+        # Finalize storages
+        if self.auto_manage_storages_states:
+            loop = always_get_an_event_loop()
+            loop.run_until_complete(self.finalize_storages())
+
+    async def initialize_storages(self):
+        """Asynchronously initialize the storages"""
+        if self._storages_status == StoragesStatus.CREATED:
+            tasks = []
+
+            for storage in (
+                self.full_docs,
+                self.text_chunks,
+                self.entities_vdb,
+                self.relationships_vdb,
+                self.chunks_vdb,
+                self.chunk_entity_relation_graph,
+                self.llm_response_cache,
+                self.doc_status,
+            ):
+                if storage:
+                    tasks.append(storage.initialize())
+
+            await asyncio.gather(*tasks)
+
+            self._storages_status = StoragesStatus.INITIALIZED
+            logger.debug("Initialized Storages")
+
+    async def finalize_storages(self):
+        """Asynchronously finalize the storages"""
+        if self._storages_status == StoragesStatus.INITIALIZED:
+            tasks = []
+
+            for storage in (
+                self.full_docs,
+                self.text_chunks,
+                self.entities_vdb,
+                self.relationships_vdb,
+                self.chunks_vdb,
+                self.chunk_entity_relation_graph,
+                self.llm_response_cache,
+                self.doc_status,
+            ):
+                if storage:
+                    tasks.append(storage.finalize())
+
+            await asyncio.gather(*tasks)
+
+            self._storages_status = StoragesStatus.FINALIZED
+            logger.debug("Finalized Storages")
+
     async def get_graph_labels(self):
         text = await self.chunk_entity_relation_graph.get_all_labels()
         return text
@@ -563,12 +477,18 @@ class LightRAG:
         storage_class = lazy_external_import(import_path, storage_name)
         return storage_class
 
+    @staticmethod
+    def clean_text(text: str) -> str:
+        """Clean text by removing null bytes (0x00) and whitespace"""
+        return text.strip().replace("\x00", "")
+
     def insert(
         self,
         input: str | list[str],
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
-    ):
+        ids: list[str] | None = None,
+    ) -> None:
         """Sync Insert documents with checkpoint support
 
         Args:
@@ -576,10 +496,11 @@ class LightRAG:
             split_by_character: if split_by_character is not None, split the string by character, if chunk longer than
             split_by_character_only: if split_by_character_only is True, split the string by character only, when
             split_by_character is None, this parameter is ignored.
+            ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
         """
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(
-            self.ainsert(input, split_by_character, split_by_character_only)
+        loop.run_until_complete(
+            self.ainsert(input, split_by_character, split_by_character_only, ids)
         )
 
     async def ainsert(
@@ -587,7 +508,8 @@ class LightRAG:
         input: str | list[str],
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
-    ):
+        ids: list[str] | None = None,
+    ) -> None:
         """Async Insert documents with checkpoint support
 
         Args:
@@ -595,40 +517,45 @@ class LightRAG:
             split_by_character: if split_by_character is not None, split the string by character, if chunk longer than
             split_by_character_only: if split_by_character_only is True, split the string by character only, when
             split_by_character is None, this parameter is ignored.
+            ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
         """
-        await self.apipeline_enqueue_documents(input)
+        await self.apipeline_enqueue_documents(input, ids)
         await self.apipeline_process_enqueue_documents(
             split_by_character, split_by_character_only
         )
 
-    def insert_custom_chunks(self, full_text: str, text_chunks: list[str]):
+    def insert_custom_chunks(self, full_text: str, text_chunks: list[str]) -> None:
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(
-            self.ainsert_custom_chunks(full_text, text_chunks)
-        )
+        loop.run_until_complete(self.ainsert_custom_chunks(full_text, text_chunks))
 
-    async def ainsert_custom_chunks(self, full_text: str, text_chunks: list[str]):
+    async def ainsert_custom_chunks(
+        self, full_text: str, text_chunks: list[str]
+    ) -> None:
         update_storage = False
         try:
-            doc_key = compute_mdhash_id(full_text.strip(), prefix="doc-")
-            new_docs = {doc_key: {"content": full_text.strip()}}
+            # Clean input texts
+            full_text = self.clean_text(full_text)
+            text_chunks = [self.clean_text(chunk) for chunk in text_chunks]
 
-            _add_doc_keys = await self.full_docs.filter_keys(set(doc_key))
+            # Process cleaned texts
+            doc_key = compute_mdhash_id(full_text, prefix="doc-")
+            new_docs = {doc_key: {"content": full_text}}
+
+            _add_doc_keys = await self.full_docs.filter_keys({doc_key})
             new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
             if not len(new_docs):
                 logger.warning("This document is already in the storage.")
                 return
 
             update_storage = True
-            logger.info(f"[New Docs] inserting {len(new_docs)} docs")
+            logger.info(f"Inserting {len(new_docs)} docs")
 
             inserting_chunks: dict[str, Any] = {}
             for chunk_text in text_chunks:
-                chunk_text_stripped = chunk_text.strip()
-                chunk_key = compute_mdhash_id(chunk_text_stripped, prefix="chunk-")
+                chunk_key = compute_mdhash_id(chunk_text, prefix="chunk-")
 
                 inserting_chunks[chunk_key] = {
-                    "content": chunk_text_stripped,
+                    "content": chunk_text,
                     "full_doc_id": doc_key,
                 }
 
@@ -653,24 +580,50 @@ class LightRAG:
             if update_storage:
                 await self._insert_done()
 
-    async def apipeline_enqueue_documents(self, input: str | list[str]):
+    async def apipeline_enqueue_documents(
+        self, input: str | list[str], ids: list[str] | None = None
+    ) -> None:
         """
         Pipeline for Processing Documents
 
-        1. Remove duplicate contents from the list
-        2. Generate document IDs and initial status
-        3. Filter out already processed documents
-        4. Enqueue document in status
+        1. Validate ids if provided or generate MD5 hash IDs
+        2. Remove duplicate contents
+        3. Generate document initial status
+        4. Filter out already processed documents
+        5. Enqueue document in status
         """
         if isinstance(input, str):
             input = [input]
 
-        # 1. Remove duplicate contents from the list
-        unique_contents = list(set(doc.strip() for doc in input))
+        # 1. Validate ids if provided or generate MD5 hash IDs
+        if ids is not None:
+            # Check if the number of IDs matches the number of documents
+            if len(ids) != len(input):
+                raise ValueError("Number of IDs must match the number of documents")
 
-        # 2. Generate document IDs and initial status
+            # Check if IDs are unique
+            if len(ids) != len(set(ids)):
+                raise ValueError("IDs must be unique")
+
+            # Generate contents dict of IDs provided by user and documents
+            contents = {id_: doc for id_, doc in zip(ids, input)}
+        else:
+            # Clean input text and remove duplicates
+            input = list(set(self.clean_text(doc) for doc in input))
+            # Generate contents dict of MD5 hash IDs and documents
+            contents = {compute_mdhash_id(doc, prefix="doc-"): doc for doc in input}
+
+        # 2. Remove duplicate contents
+        unique_contents = {
+            id_: content
+            for content, id_ in {
+                content: id_ for id_, content in contents.items()
+            }.items()
+        }
+
+        # 3. Generate document initial status
         new_docs: dict[str, Any] = {
-            compute_mdhash_id(content, prefix="doc-"): {
+            id_: {
                 "content": content,
                 "content_summary": self._get_content_summary(content),
                 "content_length": len(content),
@@ -678,10 +631,10 @@ class LightRAG:
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }
-            for content in unique_contents
+            for id_, content in unique_contents.items()
         }
 
-        # 3. Filter out already processed documents
+        # 4. Filter out already processed documents
         # Get docs ids
         all_new_doc_ids = set(new_docs.keys())
         # Exclude IDs of documents that are already in progress
@@ -693,7 +646,7 @@ class LightRAG:
             logger.info("No new unique documents were found.")
             return
 
-        # 4. Store status document
+        # 5. Store status document
         await self.doc_status.upsert(new_docs)
         logger.info(f"Stored {len(new_docs)} new unique documents")
 
@@ -713,108 +666,120 @@ class LightRAG:
         4. Update the document status
         """
         # 1. Get all pending, failed, and abnormally terminated processing documents.
-        to_process_docs: dict[str, DocProcessingStatus] = {}
+        # Run the asynchronous status retrievals in parallel using asyncio.gather
+        processing_docs, failed_docs, pending_docs = await asyncio.gather(
+            self.doc_status.get_docs_by_status(DocStatus.PROCESSING),
+            self.doc_status.get_docs_by_status(DocStatus.FAILED),
+            self.doc_status.get_docs_by_status(DocStatus.PENDING),
+        )
 
-        processing_docs = await self.doc_status.get_processing_docs()
+        to_process_docs: dict[str, DocProcessingStatus] = {}
         to_process_docs.update(processing_docs)
-        failed_docs = await self.doc_status.get_failed_docs()
         to_process_docs.update(failed_docs)
-        pendings_docs = await self.doc_status.get_pending_docs()
-        to_process_docs.update(pendings_docs)
+        to_process_docs.update(pending_docs)
 
         if not to_process_docs:
             logger.info("All documents have been processed or are duplicates")
             return
 
         # 2. split docs into chunks, insert chunks, update doc status
-        batch_size = self.addon_params.get("insert_batch_size", 10)
         docs_batches = [
-            list(to_process_docs.items())[i : i + batch_size]
-            for i in range(0, len(to_process_docs), batch_size)
+            list(to_process_docs.items())[i : i + self.max_parallel_insert]
+            for i in range(0, len(to_process_docs), self.max_parallel_insert)
         ]
 
         logger.info(f"Number of batches to process: {len(docs_batches)}.")
 
+        batches: list[Any] = []
         # 3. iterate over batches
         for batch_idx, docs_batch in enumerate(docs_batches):
-            # 4. iterate over batch
-            for doc_id_processing_status in docs_batch:
-                doc_id, status_doc = doc_id_processing_status
-                # Update status in processing
-                doc_status_id = compute_mdhash_id(status_doc.content, prefix="doc-")
-                await self.doc_status.upsert(
-                    {
-                        doc_status_id: {
-                            "status": DocStatus.PROCESSING,
-                            "updated_at": datetime.now().isoformat(),
-                            "content": status_doc.content,
-                            "content_summary": status_doc.content_summary,
-                            "content_length": status_doc.content_length,
-                            "created_at": status_doc.created_at,
-                        }
-                    }
-                )
-                # Generate chunks from document
-                chunks: dict[str, Any] = {
-                    compute_mdhash_id(dp["content"], prefix="chunk-"): {
-                        **dp,
-                        "full_doc_id": doc_id,
-                    }
-                    for dp in self.chunking_func(
-                        status_doc.content,
-                        split_by_character,
-                        split_by_character_only,
-                        self.chunk_overlap_token_size,
-                        self.chunk_token_size,
-                        self.tiktoken_model_name,
-                    )
-                }
 
-                # Process document (text chunks and full docs) in parallel
-                tasks = [
-                    self.chunks_vdb.upsert(chunks),
-                    self._process_entity_relation_graph(chunks),
-                    self.full_docs.upsert({doc_id: {"content": status_doc.content}}),
-                    self.text_chunks.upsert(chunks),
-                ]
-                try:
-                    await asyncio.gather(*tasks)
-                    await self.doc_status.update_doc_status(
-                        {
-                            doc_status_id: {
-                                "status": DocStatus.PROCESSED,
-                                "chunks_count": len(chunks),
-                                "content": status_doc.content,
-                                "content_summary": status_doc.content_summary,
-                                "content_length": status_doc.content_length,
-                                "created_at": status_doc.created_at,
-                                "updated_at": datetime.now().isoformat(),
-                            }
+            async def batch(
+                batch_idx: int,
+                docs_batch: list[tuple[str, DocProcessingStatus]],
+                size_batch: int,
+            ) -> None:
+                logger.info(f"Start processing batch {batch_idx + 1} of {size_batch}.")
+                # 4. iterate over batch
+                for doc_id_processing_status in docs_batch:
+                    doc_id, status_doc = doc_id_processing_status
+                    # Generate chunks from document
+                    chunks: dict[str, Any] = {
+                        compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                            **dp,
+                            "full_doc_id": doc_id,
                         }
-                    )
-                    await self._insert_done()
+                        for dp in self.chunking_func(
+                            status_doc.content,
+                            split_by_character,
+                            split_by_character_only,
+                            self.chunk_overlap_token_size,
+                            self.chunk_token_size,
+                            self.tiktoken_model_name,
+                        )
+                    }
+                    # Process document (text chunks and full docs) in parallel
+                    tasks = [
+                        self.doc_status.upsert(
+                            {
+                                doc_id: {
+                                    "status": DocStatus.PROCESSING,
+                                    "updated_at": datetime.now().isoformat(),
+                                    "content": status_doc.content,
+                                    "content_summary": status_doc.content_summary,
+                                    "content_length": status_doc.content_length,
+                                    "created_at": status_doc.created_at,
+                                }
+                            }
+                        ),
+                        self.chunks_vdb.upsert(chunks),
+                        self._process_entity_relation_graph(chunks),
+                        self.full_docs.upsert(
+                            {doc_id: {"content": status_doc.content}}
+                        ),
+                        self.text_chunks.upsert(chunks),
+                    ]
+                    try:
+                        await asyncio.gather(*tasks)
+                        await self.doc_status.upsert(
+                            {
+                                doc_id: {
+                                    "status": DocStatus.PROCESSED,
+                                    "chunks_count": len(chunks),
+                                    "content": status_doc.content,
+                                    "content_summary": status_doc.content_summary,
+                                    "content_length": status_doc.content_length,
+                                    "created_at": status_doc.created_at,
+                                    "updated_at": datetime.now().isoformat(),
+                                }
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to process document {doc_id}: {str(e)}")
+                        await self.doc_status.upsert(
+                            {
+                                doc_id: {
+                                    "status": DocStatus.FAILED,
+                                    "error": str(e),
+                                    "content": status_doc.content,
+                                    "content_summary": status_doc.content_summary,
+                                    "content_length": status_doc.content_length,
+                                    "created_at": status_doc.created_at,
+                                    "updated_at": datetime.now().isoformat(),
+                                }
+                            }
+                        )
+                        continue
+                logger.info(f"Completed batch {batch_idx + 1} of {len(docs_batches)}.")
 
-                except Exception as e:
-                    logger.error(f"Failed to process document {doc_id}: {str(e)}")
-                    await self.doc_status.update_doc_status(
-                        {
-                            doc_status_id: {
-                                "status": DocStatus.FAILED,
-                                "error": str(e),
-                                "content": status_doc.content,
-                                "content_summary": status_doc.content_summary,
-                                "content_length": status_doc.content_length,
-                                "created_at": status_doc.created_at,
-                                "updated_at": datetime.now().isoformat(),
-                            }
-                        }
-                    )
-                    continue
-            logger.info(f"Completed batch {batch_idx + 1} of {len(docs_batches)}.")
+            batches.append(batch(batch_idx, docs_batch, len(docs_batches)))
+
+        await asyncio.gather(*batches)
+        await self._insert_done()
 
     async def _process_entity_relation_graph(self, chunk: dict[str, Any]) -> None:
         try:
-            new_kg = await extract_entities(
+            await extract_entities(
                 chunk,
                 knowledge_graph_inst=self.chunk_entity_relation_graph,
                 entity_vdb=self.entities_vdb,
@@ -822,17 +787,11 @@ class LightRAG:
                 llm_response_cache=self.llm_response_cache,
                 global_config=asdict(self),
             )
-            if new_kg is None:
-                logger.info("No new entities or relationships extracted.")
-            else:
-                logger.info("New entities or relationships extracted.")
-                self.chunk_entity_relation_graph = new_kg
-
         except Exception as e:
             logger.error("Failed to extract entities and relationships")
             raise e
 
-    async def _insert_done(self):
+    async def _insert_done(self) -> None:
         tasks = [
             cast(StorageNameSpace, storage_inst).index_done_callback()
             for storage_inst in [  # type: ignore
@@ -847,23 +806,41 @@ class LightRAG:
             if storage_inst is not None
         ]
         await asyncio.gather(*tasks)
+        logger.info("All Insert done")
 
-    def insert_custom_kg(self, custom_kg: dict[str, Any]):
+    def insert_custom_kg(self, custom_kg: dict[str, Any]) -> None:
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.ainsert_custom_kg(custom_kg))
+        loop.run_until_complete(self.ainsert_custom_kg(custom_kg))
 
-    async def ainsert_custom_kg(self, custom_kg: dict[str, Any]):
+    async def ainsert_custom_kg(self, custom_kg: dict[str, Any]) -> None:
         update_storage = False
         try:
             # Insert chunks into vector storage
             all_chunks_data: dict[str, dict[str, str]] = {}
             chunk_to_source_map: dict[str, str] = {}
             for chunk_data in custom_kg.get("chunks", {}):
-                chunk_content = chunk_data["content"]
+                chunk_content = self.clean_text(chunk_data["content"])
                 source_id = chunk_data["source_id"]
-                chunk_id = compute_mdhash_id(chunk_content.strip(), prefix="chunk-")
+                tokens = len(
+                    encode_string_by_tiktoken(
+                        chunk_content, model_name=self.tiktoken_model_name
+                    )
+                )
+                chunk_order_index = (
+                    0
+                    if "chunk_order_index" not in chunk_data.keys()
+                    else chunk_data["chunk_order_index"]
+                )
+                chunk_id = compute_mdhash_id(chunk_content, prefix="chunk-")
 
-                chunk_entry = {"content": chunk_content.strip(), "source_id": source_id}
+                chunk_entry = {
+                    "content": chunk_content,
+                    "source_id": source_id,
+                    "tokens": tokens,
+                    "chunk_order_index": chunk_order_index,
+                    "full_doc_id": source_id,
+                    "status": DocStatus.PROCESSED,
+                }
                 all_chunks_data[chunk_id] = chunk_entry
                 chunk_to_source_map[source_id] = chunk_id
                 update_storage = True
@@ -984,7 +961,10 @@ class LightRAG:
                 await self._insert_done()
 
     def query(
-        self, query: str, param: QueryParam = QueryParam(), prompt: str | None = None
+        self,
+        query: str,
+        param: QueryParam = QueryParam(),
+        system_prompt: str | None = None,
     ) -> str | Iterator[str]:
         """
         Perform a sync query.
@@ -999,13 +979,13 @@ class LightRAG:
         """
         loop = always_get_an_event_loop()
 
-        return loop.run_until_complete(self.aquery(query, param, prompt))  # type: ignore
+        return loop.run_until_complete(self.aquery(query, param, system_prompt))  # type: ignore
 
     async def aquery(
         self,
         query: str,
         param: QueryParam = QueryParam(),
-        prompt: str | None = None,
+        system_prompt: str | None = None,
     ) -> str | AsyncIterator[str]:
         """
         Perform a async query.
@@ -1037,7 +1017,7 @@ class LightRAG:
                     global_config=asdict(self),
                     embedding_func=self.embedding_func,
                 ),
-                prompt=prompt,
+                system_prompt=system_prompt,
             )
         elif param.mode == "naive":
             response = await naive_query(
@@ -1056,6 +1036,7 @@ class LightRAG:
                     global_config=asdict(self),
                     embedding_func=self.embedding_func,
                 ),
+                system_prompt=system_prompt,
             )
         elif param.mode == "mix":
             response = await mix_kg_vector_query(
@@ -1077,6 +1058,7 @@ class LightRAG:
                     global_config=asdict(self),
                     embedding_func=self.embedding_func,
                 ),
+                system_prompt=system_prompt,
             )
         else:
             raise ValueError(f"Unknown mode {param.mode}")
@@ -1105,7 +1087,6 @@ class LightRAG:
         # ---------------------
         # STEP 1: Keyword Extraction
         # ---------------------
-        # We'll assume 'extract_keywords_only(...)' returns (hl_keywords, ll_keywords).
         hl_keywords, ll_keywords = await extract_keywords_only(
             text=query,
             param=param,
@@ -1200,11 +1181,11 @@ class LightRAG:
     async def _query_done(self):
         await self.llm_response_cache.index_done_callback()
 
-    def delete_by_entity(self, entity_name: str):
+    def delete_by_entity(self, entity_name: str) -> None:
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.adelete_by_entity(entity_name))
 
-    async def adelete_by_entity(self, entity_name: str):
+    async def adelete_by_entity(self, entity_name: str) -> None:
         entity_name = f'"{entity_name.upper()}"'
 
         try:
@@ -1219,7 +1200,7 @@ class LightRAG:
         except Exception as e:
             logger.error(f"Error while deleting entity '{entity_name}': {e}")
 
-    async def _delete_by_entity_done(self):
+    async def _delete_by_entity_done(self) -> None:
         await asyncio.gather(
             *[
                 cast(StorageNameSpace, storage_inst).index_done_callback()
@@ -1253,6 +1234,16 @@ class LightRAG:
             Dict with counts for each status
         """
         return await self.doc_status.get_status_counts()
+
+    async def get_docs_by_status(
+        self, status: DocStatus
+    ) -> dict[str, DocProcessingStatus]:
+        """Get documents by status
+
+        Returns:
+            Dict with document id is keys and document status is values
+        """
+        return await self.doc_status.get_docs_by_status(status)
 
     async def adelete_by_doc_id(self, doc_id: str) -> None:
         """Delete a document and all its related data
@@ -1482,7 +1473,7 @@ class LightRAG:
 
     async def get_relation_info(
         self, src_entity: str, tgt_entity: str, include_vector_data: bool = False
-    ):
+    ) -> dict[str, str | None | dict[str, str]]:
         """Get detailed information of a relationship
 
         Args:
@@ -1521,3 +1512,21 @@ class LightRAG:
             result["vector_data"] = vector_data[0] if vector_data else None
 
         return result
+
+    def check_storage_env_vars(self, storage_name: str) -> None:
+        """Check if all required environment variables for storage implementation exist
+
+        Args:
+            storage_name: Storage implementation name
+
+        Raises:
+            ValueError: If required environment variables are missing
+        """
+        required_vars = STORAGE_ENV_REQUIREMENTS.get(storage_name, [])
+        missing_vars = [var for var in required_vars if var not in os.environ]
+
+        if missing_vars:
+            raise ValueError(
+                f"Storage implementation '{storage_name}' requires the following "
+                f"environment variables: {', '.join(missing_vars)}"
+            )

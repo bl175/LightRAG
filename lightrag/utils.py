@@ -13,12 +13,47 @@ from functools import wraps
 from hashlib import md5
 from typing import Any, Callable
 import xml.etree.ElementTree as ET
-import bs4
-
 import numpy as np
 import tiktoken
-
 from lightrag.prompt import PROMPTS
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(override=True)
+
+
+VERBOSE_DEBUG = os.getenv("VERBOSE", "false").lower() == "true"
+
+
+def verbose_debug(msg: str, *args, **kwargs):
+    """Function for outputting detailed debug information.
+    When VERBOSE_DEBUG=True, outputs the complete message.
+    When VERBOSE_DEBUG=False, outputs only the first 50 characters.
+
+    Args:
+        msg: The message format string
+        *args: Arguments to be formatted into the message
+        **kwargs: Keyword arguments passed to logger.debug()
+    """
+    if VERBOSE_DEBUG:
+        logger.debug(msg, *args, **kwargs)
+    else:
+        # Format the message with args first
+        if args:
+            formatted_msg = msg % args
+        else:
+            formatted_msg = msg
+        # Then truncate the formatted message
+        truncated_msg = (
+            formatted_msg[:50] + "..." if len(formatted_msg) > 50 else formatted_msg
+        )
+        logger.debug(truncated_msg, **kwargs)
+
+
+def set_verbose_debug(enabled: bool):
+    """Enable or disable verbose debug output"""
+    global VERBOSE_DEBUG
+    VERBOSE_DEBUG = enabled
 
 
 class UnlimitedSemaphore:
@@ -41,11 +76,17 @@ logger = logging.getLogger("lightrag")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def set_logger(log_file: str):
-    logger.setLevel(logging.DEBUG)
+def set_logger(log_file: str, level: int = logging.DEBUG):
+    """Set up file logging with the specified level.
+
+    Args:
+        log_file: Path to the log file
+        level: Logging level (e.g. logging.DEBUG, logging.INFO)
+    """
+    logger.setLevel(level)
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(level)
 
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -65,13 +106,6 @@ class EmbeddingFunc:
 
     async def __call__(self, *args, **kwargs) -> np.ndarray:
         return await self.func(*args, **kwargs)
-
-
-@dataclass
-class ReasoningResponse:
-    reasoning_content: str | None
-    response_content: str
-    tag: str
 
 
 def locate_json_string_body_from_string(content: str) -> str | None:
@@ -657,6 +691,10 @@ def get_conversation_turns(
     Returns:
         Formatted string of the conversation history
     """
+    # Check if num_turns is valid
+    if num_turns <= 0:
+        return ""
+
     # Group messages into turns
     turns: list[list[dict[str, Any]]] = []
     messages: list[dict[str, Any]] = []
@@ -702,26 +740,45 @@ def get_conversation_turns(
     return "\n".join(formatted_turns)
 
 
-def extract_reasoning(response: str, tag: str) -> ReasoningResponse:
-    """Extract the reasoning section and the following section from the LLM response.
-
-    Args:
-        response: LLM response
-        tag: Tag to extract
-    Returns:
-        ReasoningResponse: Reasoning section and following section
-
+def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
     """
-    soup = bs4.BeautifulSoup(response, "html.parser")
+    Ensure that there is always an event loop available.
 
-    reasoning_section = soup.find(tag)
-    if reasoning_section is None:
-        return ReasoningResponse(None, response, tag)
-    reasoning_content = reasoning_section.get_text().strip()
+    This function tries to get the current event loop. If the current event loop is closed or does not exist,
+    it creates a new event loop and sets it as the current event loop.
 
-    after_reasoning_section = reasoning_section.next_sibling
-    if after_reasoning_section is None:
-        return ReasoningResponse(reasoning_content, "", tag)
-    after_reasoning_content = after_reasoning_section.get_text().strip()
+    Returns:
+        asyncio.AbstractEventLoop: The current or newly created event loop.
+    """
+    try:
+        # Try to get the current event loop
+        current_loop = asyncio.get_event_loop()
+        if current_loop.is_closed():
+            raise RuntimeError("Event loop is closed.")
+        return current_loop
 
-    return ReasoningResponse(reasoning_content, after_reasoning_content, tag)
+    except RuntimeError:
+        # If no event loop exists or it is closed, create a new one
+        logger.info("Creating a new event loop in main thread.")
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        return new_loop
+
+
+def lazy_external_import(module_name: str, class_name: str) -> Callable[..., Any]:
+    """Lazily import a class from an external module based on the package of the caller."""
+    # Get the caller's module and package
+    import inspect
+
+    caller_frame = inspect.currentframe().f_back
+    module = inspect.getmodule(caller_frame)
+    package = module.__package__ if module else None
+
+    def import_class(*args: Any, **kwargs: Any):
+        import importlib
+
+        module = importlib.import_module(module_name, package=package)
+        cls = getattr(module, class_name)
+        return cls(*args, **kwargs)
+
+    return import_class

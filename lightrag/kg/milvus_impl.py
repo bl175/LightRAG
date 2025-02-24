@@ -1,26 +1,29 @@
 import asyncio
 import os
-from tqdm.asyncio import tqdm as tqdm_async
+from typing import Any, final
 from dataclasses import dataclass
 import numpy as np
 from lightrag.utils import logger
 from ..base import BaseVectorStorage
 import pipmaster as pm
-import configparser
+
+
+if not pm.is_installed("configparser"):
+    pm.install("configparser")
 
 if not pm.is_installed("pymilvus"):
     pm.install("pymilvus")
-from pymilvus import MilvusClient
 
+import configparser
+from pymilvus import MilvusClient
 
 config = configparser.ConfigParser()
 config.read("config.ini", "utf-8")
 
 
+@final
 @dataclass
 class MilvusVectorDBStorage(BaseVectorStorage):
-    cosine_better_than_threshold: float = None
-
     @staticmethod
     def create_collection_if_not_exist(
         client: MilvusClient, collection_name: str, **kwargs
@@ -71,12 +74,12 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             dimension=self.embedding_func.embedding_dim,
         )
 
-    async def upsert(self, data: dict[str, dict]):
-        logger.info(f"Inserting {len(data)} vectors to {self.namespace}")
-        if not len(data):
-            logger.warning("You insert an empty data to vector DB")
-            return []
-        list_data = [
+    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
+        logger.info(f"Inserting {len(data)} to {self.namespace}")
+        if not data:
+            return
+
+        list_data: list[dict[str, Any]] = [
             {
                 "id": k,
                 **{k1: v1 for k1, v1 in v.items() if k1 in self.meta_fields},
@@ -89,15 +92,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             for i in range(0, len(contents), self._max_batch_size)
         ]
 
-        async def wrapped_task(batch):
-            result = await self.embedding_func(batch)
-            pbar.update(1)
-            return result
-
-        embedding_tasks = [wrapped_task(batch) for batch in batches]
-        pbar = tqdm_async(
-            total=len(embedding_tasks), desc="Generating embeddings", unit="batch"
-        )
+        embedding_tasks = [self.embedding_func(batch) for batch in batches]
         embeddings_list = await asyncio.gather(*embedding_tasks)
 
         embeddings = np.concatenate(embeddings_list)
@@ -106,7 +101,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         results = self._client.upsert(collection_name=self.namespace, data=list_data)
         return results
 
-    async def query(self, query, top_k=5):
+    async def query(self, query: str, top_k: int) -> list[dict[str, Any]]:
         embedding = await self.embedding_func([query])
         results = self._client.search(
             collection_name=self.namespace,
@@ -123,3 +118,13 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             {**dp["entity"], "id": dp["id"], "distance": dp["distance"]}
             for dp in results[0]
         ]
+
+    async def index_done_callback(self) -> None:
+        # Milvus handles persistence automatically
+        pass
+
+    async def delete_entity(self, entity_name: str) -> None:
+        raise NotImplementedError
+
+    async def delete_entity_relation(self, entity_name: str) -> None:
+        raise NotImplementedError

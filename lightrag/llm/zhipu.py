@@ -1,48 +1,7 @@
-"""
-Zhipu LLM Interface Module
-==========================
-
-This module provides interfaces for interacting with LMDeploy's language models,
-including text generation and embedding capabilities.
-
-Author: Lightrag team
-Created: 2024-01-24
-License: MIT License
-
-Copyright (c) 2024 Lightrag
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-Version: 1.0.0
-
-Change Log:
-- 1.0.0 (2024-01-24): Initial release
-    * Added async chat completion support
-    * Added embedding generation
-    * Added stream response capability
-
-Dependencies:
-    - tenacity
-    - numpy
-    - pipmaster
-    - Python >= 3.10
-
-Usage:
-    from llm_interfaces.zhipu import zhipu_model_complete, zhipu_embed
-"""
-
-__version__ = "1.0.0"
-__author__ = "lightrag Team"
-__status__ = "Production"
-
 import sys
 import re
 import json
+from ..utils import verbose_debug
 
 if sys.version_info < (3, 9):
     pass
@@ -119,7 +78,7 @@ async def zhipu_complete_if_cache(
     # Add debug logging
     logger.debug("===== Query Input to LLM =====")
     logger.debug(f"Query: {prompt}")
-    logger.debug(f"System prompt: {system_prompt}")
+    verbose_debug(f"System prompt: {system_prompt}")
 
     # Remove unsupported kwargs
     kwargs = {

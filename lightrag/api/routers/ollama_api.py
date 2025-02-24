@@ -5,30 +5,13 @@ import logging
 import time
 import json
 import re
-import os
 from enum import Enum
 from fastapi.responses import StreamingResponse
 import asyncio
 from ascii_colors import trace_exception
 from lightrag import LightRAG, QueryParam
-from dotenv import load_dotenv
-
-
-# Load environment variables
-load_dotenv(override=True)
-
-
-class OllamaServerInfos:
-    # Constants for emulated Ollama model information
-    LIGHTRAG_NAME = "lightrag"
-    LIGHTRAG_TAG = os.getenv("OLLAMA_EMULATING_MODEL_TAG", "latest")
-    LIGHTRAG_MODEL = f"{LIGHTRAG_NAME}:{LIGHTRAG_TAG}"
-    LIGHTRAG_SIZE = 7365960935  # it's a dummy value
-    LIGHTRAG_CREATED_AT = "2024-01-15T00:00:00Z"
-    LIGHTRAG_DIGEST = "sha256:lightrag"
-
-
-ollama_server_infos = OllamaServerInfos()
+from lightrag.utils import encode_string_by_tiktoken
+from ..utils_api import ollama_server_infos
 
 
 # query mode according to query prefix (bypass is not LightRAG quer mode)
@@ -111,18 +94,9 @@ class OllamaTagResponse(BaseModel):
 
 
 def estimate_tokens(text: str) -> int:
-    """Estimate the number of tokens in text
-    Chinese characters: approximately 1.5 tokens per character
-    English characters: approximately 0.25 tokens per character
-    """
-    # Use regex to match Chinese and non-Chinese characters separately
-    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
-    non_chinese_chars = len(re.findall(r"[^\u4e00-\u9fff]", text))
-
-    # Calculate estimated token count
-    tokens = chinese_chars * 1.5 + non_chinese_chars * 0.25
-
-    return int(tokens)
+    """Estimate the number of tokens in text using tiktoken"""
+    tokens = encode_string_by_tiktoken(text)
+    return len(tokens)
 
 
 def parse_query_mode(query: str) -> tuple[str, SearchMode]:
@@ -152,7 +126,7 @@ class OllamaAPI:
         self.rag = rag
         self.ollama_server_infos = ollama_server_infos
         self.top_k = top_k
-        self.router = APIRouter()
+        self.router = APIRouter(tags=["ollama"])
         self.setup_routes()
 
     def setup_routes(self):

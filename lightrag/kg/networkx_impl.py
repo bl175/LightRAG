@@ -1,61 +1,11 @@
-"""
-NetworkX Storage Module
-=======================
-
-This module provides a storage interface for graphs using NetworkX, a popular Python library for creating, manipulating, and studying the structure, dynamics, and functions of complex networks.
-
-The `NetworkXStorage` class extends the `BaseGraphStorage` class from the LightRAG library, providing methods to load, save, manipulate, and query graphs using NetworkX.
-
-Author: lightrag team
-Created: 2024-01-25
-License: MIT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-Version: 1.0.0
-
-Dependencies:
-    - NetworkX
-    - NumPy
-    - LightRAG
-    - graspologic
-
-Features:
-    - Load and save graphs in various formats (e.g., GEXF, GraphML, JSON)
-    - Query graph nodes and edges
-    - Calculate node and edge degrees
-    - Embed nodes using various algorithms (e.g., Node2Vec)
-    - Remove nodes and edges from the graph
-
-Usage:
-    from lightrag.storage.networkx_storage import NetworkXStorage
-
-"""
-
-import html
 import os
 from dataclasses import dataclass
-from typing import Any, Union, cast
-import networkx as nx
+from typing import Any, final
+
 import numpy as np
 
 
+from lightrag.types import KnowledgeGraph
 from lightrag.utils import (
     logger,
 )
@@ -63,8 +13,19 @@ from lightrag.utils import (
 from lightrag.base import (
     BaseGraphStorage,
 )
+import pipmaster as pm
+
+if not pm.is_installed("networkx"):
+    pm.install("networkx")
+
+if not pm.is_installed("graspologic"):
+    pm.install("graspologic")
+
+import networkx as nx
+from graspologic import embed
 
 
+@final
 @dataclass
 class NetworkXStorage(BaseGraphStorage):
     @staticmethod
@@ -79,21 +40,6 @@ class NetworkXStorage(BaseGraphStorage):
             f"Writing graph with {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges"
         )
         nx.write_graphml(graph, file_name)
-
-    @staticmethod
-    def stable_largest_connected_component(graph: nx.Graph) -> nx.Graph:
-        """Refer to https://github.com/microsoft/graphrag/index/graph/utils/stable_lcc.py
-        Return the largest connected component of the graph, with nodes and edges sorted in a stable way.
-        """
-        from graspologic.utils import largest_connected_component
-
-        graph = graph.copy()
-        graph = cast(nx.Graph, largest_connected_component(graph))
-        node_mapping = {
-            node: html.unescape(node.upper().strip()) for node in graph.nodes()
-        }  # type: ignore
-        graph = nx.relabel_nodes(graph, node_mapping)
-        return NetworkXStorage._stabilize_graph(graph)
 
     @staticmethod
     def _stabilize_graph(graph: nx.Graph) -> nx.Graph:
@@ -142,7 +88,7 @@ class NetworkXStorage(BaseGraphStorage):
             "node2vec": self._node2vec_embed,
         }
 
-    async def index_done_callback(self):
+    async def index_done_callback(self) -> None:
         NetworkXStorage.write_nx_graph(self._graph, self._graphml_xml_file)
 
     async def has_node(self, node_id: str) -> bool:
@@ -151,7 +97,7 @@ class NetworkXStorage(BaseGraphStorage):
     async def has_edge(self, source_node_id: str, target_node_id: str) -> bool:
         return self._graph.has_edge(source_node_id, target_node_id)
 
-    async def get_node(self, node_id: str) -> Union[dict, None]:
+    async def get_node(self, node_id: str) -> dict[str, str] | None:
         return self._graph.nodes.get(node_id)
 
     async def node_degree(self, node_id: str) -> int:
@@ -162,43 +108,38 @@ class NetworkXStorage(BaseGraphStorage):
 
     async def get_edge(
         self, source_node_id: str, target_node_id: str
-    ) -> Union[dict, None]:
+    ) -> dict[str, str] | None:
         return self._graph.edges.get((source_node_id, target_node_id))
 
-    async def get_node_edges(self, source_node_id: str):
+    async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
         if self._graph.has_node(source_node_id):
             return list(self._graph.edges(source_node_id))
         return None
 
-    async def upsert_node(self, node_id: str, node_data: dict[str, str]):
+    async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
         self._graph.add_node(node_id, **node_data)
 
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
-    ):
+    ) -> None:
         self._graph.add_edge(source_node_id, target_node_id, **edge_data)
 
-    async def delete_node(self, node_id: str):
-        """
-        Delete a node from the graph based on the specified node_id.
-
-        :param node_id: The node_id to delete
-        """
+    async def delete_node(self, node_id: str) -> None:
         if self._graph.has_node(node_id):
             self._graph.remove_node(node_id)
             logger.info(f"Node {node_id} deleted from the graph.")
         else:
             logger.warning(f"Node {node_id} not found in the graph for deletion.")
 
-    async def embed_nodes(self, algorithm: str) -> tuple[np.ndarray, list[str]]:
+    async def embed_nodes(
+        self, algorithm: str
+    ) -> tuple[np.ndarray[Any, Any], list[str]]:
         if algorithm not in self._node_embed_algorithms:
             raise ValueError(f"Node embedding algorithm {algorithm} not supported")
         return await self._node_embed_algorithms[algorithm]()
 
     # @TODO: NOT USED
     async def _node2vec_embed(self):
-        from graspologic import embed
-
         embeddings, nodes = embed.node2vec_embed(
             self._graph,
             **self.global_config["node2vec_params"],
@@ -226,3 +167,11 @@ class NetworkXStorage(BaseGraphStorage):
         for source, target in edges:
             if self._graph.has_edge(source, target):
                 self._graph.remove_edge(source, target)
+
+    async def get_all_labels(self) -> list[str]:
+        raise NotImplementedError
+
+    async def get_knowledge_graph(
+        self, node_label: str, max_depth: int = 5
+    ) -> KnowledgeGraph:
+        raise NotImplementedError

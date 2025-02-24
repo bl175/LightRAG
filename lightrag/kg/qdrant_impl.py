@@ -1,22 +1,24 @@
 import asyncio
 import os
-from tqdm.asyncio import tqdm as tqdm_async
+from typing import Any, final
 from dataclasses import dataclass
 import numpy as np
 import hashlib
 import uuid
 from ..utils import logger
 from ..base import BaseVectorStorage
-import pipmaster as pm
 import configparser
 
-if not pm.is_installed("qdrant_client"):
-    pm.install("qdrant_client")
-
-from qdrant_client import QdrantClient, models
 
 config = configparser.ConfigParser()
 config.read("config.ini", "utf-8")
+
+import pipmaster as pm
+
+if not pm.is_installed("qdrant-client"):
+    pm.install("qdrant-client")
+
+from qdrant_client import QdrantClient, models
 
 
 def compute_mdhash_id_for_qdrant(
@@ -47,10 +49,9 @@ def compute_mdhash_id_for_qdrant(
         raise ValueError("Invalid style. Choose from 'simple', 'hyphenated', or 'urn'.")
 
 
+@final
 @dataclass
 class QdrantVectorDBStorage(BaseVectorStorage):
-    cosine_better_than_threshold: float = None
-
     @staticmethod
     def create_collection_if_not_exist(
         client: QdrantClient, collection_name: str, **kwargs
@@ -85,10 +86,10 @@ class QdrantVectorDBStorage(BaseVectorStorage):
             ),
         )
 
-    async def upsert(self, data: dict[str, dict]):
-        if not len(data):
-            logger.warning("You insert an empty data to vector DB")
-            return []
+    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
+        logger.info(f"Inserting {len(data)} to {self.namespace}")
+        if not data:
+            return
         list_data = [
             {
                 "id": k,
@@ -102,15 +103,7 @@ class QdrantVectorDBStorage(BaseVectorStorage):
             for i in range(0, len(contents), self._max_batch_size)
         ]
 
-        async def wrapped_task(batch):
-            result = await self.embedding_func(batch)
-            pbar.update(1)
-            return result
-
-        embedding_tasks = [wrapped_task(batch) for batch in batches]
-        pbar = tqdm_async(
-            total=len(embedding_tasks), desc="Generating embeddings", unit="batch"
-        )
+        embedding_tasks = [self.embedding_func(batch) for batch in batches]
         embeddings_list = await asyncio.gather(*embedding_tasks)
 
         embeddings = np.concatenate(embeddings_list)
@@ -130,7 +123,7 @@ class QdrantVectorDBStorage(BaseVectorStorage):
         )
         return results
 
-    async def query(self, query, top_k=5):
+    async def query(self, query: str, top_k: int) -> list[dict[str, Any]]:
         embedding = await self.embedding_func([query])
         results = self._client.search(
             collection_name=self.namespace,
@@ -143,3 +136,13 @@ class QdrantVectorDBStorage(BaseVectorStorage):
         logger.debug(f"query result: {results}")
 
         return [{**dp.payload, "id": dp.id, "distance": dp.score} for dp in results]
+
+    async def index_done_callback(self) -> None:
+        # Qdrant handles persistence automatically
+        pass
+
+    async def delete_entity(self, entity_name: str) -> None:
+        raise NotImplementedError
+
+    async def delete_entity_relation(self, entity_name: str) -> None:
+        raise NotImplementedError
